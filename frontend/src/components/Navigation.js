@@ -6,6 +6,7 @@ import {
   BookOpen, 
   Calendar, 
   ShoppingCart,
+  Package,
   ChefHat
 } from 'lucide-react';
 
