@@ -403,7 +403,7 @@ const Inventory = () => {
         </Card>
 
         <Card className="custom-shadow">
-          <Content className="p-6">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Low Stock</p>
