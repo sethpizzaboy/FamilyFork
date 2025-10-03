@@ -17,6 +17,7 @@ const Navigation = () => {
     { path: '/dashboard', icon: Home, label: 'Dashboard', testId: 'nav-dashboard' },
     { path: '/family', icon: Users, label: 'Family Members', testId: 'nav-family' },
     { path: '/recipes', icon: BookOpen, label: 'Recipes', testId: 'nav-recipes' },
+    { path: '/inventory', icon: Package, label: 'Food Inventory', testId: 'nav-inventory' },
     { path: '/meal-planner', icon: Calendar, label: 'Meal Planner', testId: 'nav-meal-planner' },
     { path: '/grocery-list', icon: ShoppingCart, label: 'Grocery List', testId: 'nav-grocery-list' },
   ];
