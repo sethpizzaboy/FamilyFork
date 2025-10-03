@@ -4,6 +4,7 @@ import '@/App.css';
 import Dashboard from './components/Dashboard';
 import FamilyMembers from './components/FamilyMembers';
 import Recipes from './components/Recipes';
+import Inventory from './components/Inventory';
 import MealPlanner from './components/MealPlanner';
 import GroceryList from './components/GroceryList';
 import Navigation from './components/Navigation';
