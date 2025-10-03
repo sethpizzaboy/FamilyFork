@@ -143,6 +143,51 @@ class GroceryList(BaseModel):
     items: List[GroceryListItem] = []
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class InventoryItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    quantity: float
+    unit: str
+    category: str = "general"  # produce, meat, dairy, pantry, etc.
+    barcode: Optional[str] = None
+    brand: Optional[str] = None
+    expiration_date: Optional[date] = None
+    purchase_date: Optional[date] = None
+    location: str = "pantry"  # pantry, fridge, freezer
+    notes: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class InventoryItemCreate(BaseModel):
+    name: str
+    quantity: float
+    unit: str
+    category: str = "general"
+    barcode: Optional[str] = None
+    brand: Optional[str] = None
+    expiration_date: Optional[date] = None
+    purchase_date: Optional[date] = None
+    location: str = "pantry"
+    notes: str = ""
+
+class InventoryItemUpdate(BaseModel):
+    name: Optional[str] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    category: Optional[str] = None
+    barcode: Optional[str] = None
+    brand: Optional[str] = None
+    expiration_date: Optional[date] = None
+    purchase_date: Optional[date] = None
+    location: Optional[str] = None
+    notes: Optional[str] = None
+
+class BarcodeProductInfo(BaseModel):
+    name: str
+    brand: Optional[str] = None
+    category: str = "general"
+    unit: str = "each"
+
 # Helper functions
 def prepare_for_mongo(data: dict) -> dict:
     """Convert Python objects to MongoDB-compatible format"""
