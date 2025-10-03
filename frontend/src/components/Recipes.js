@@ -318,33 +318,33 @@ const Recipes = () => {
             {/* Filter Mode */}
             <div className="space-y-2">
               <Label>Filter Mode</Label>
-              <Select value={filterMode} onValueChange={setFilterMode} data-testid="filter-mode-select">
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="flexible">Flexible - Any Match</SelectItem>
-                  <SelectItem value="strict">Strict - All Requirements</SelectItem>
-                </SelectContent>
-              </Select>
+              <select 
+                value={filterMode} 
+                onChange={(e) => setFilterMode(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                data-testid="filter-mode-select"
+              >
+                <option value="flexible">Flexible - Any Match</option>
+                <option value="strict">Strict - All Requirements</option>
+              </select>
             </div>
 
             {/* Meal Type Filter */}
             <div className="space-y-2">
               <Label>Meal Type</Label>
-              <Select value={selectedMealType} onValueChange={setSelectedMealType} data-testid="meal-type-filter">
-                <SelectTrigger>
-                  <SelectValue placeholder="All meal types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">All meal types</SelectItem>
-                  {MEAL_TYPES.map(type => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <select 
+                value={selectedMealType} 
+                onChange={(e) => setSelectedMealType(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                data-testid="meal-type-filter"
+              >
+                <option value="">All meal types</option>
+                {MEAL_TYPES.map(type => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Clear Filters */}
