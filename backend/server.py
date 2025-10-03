@@ -509,6 +509,171 @@ async def optimize_grocery_list(week_start_date: str):
         logging.error(f"Error optimizing grocery list: {e}")
         raise HTTPException(status_code=500, detail="Failed to optimize grocery list")
 
+# Inventory Management endpoints
+@api_router.post("/inventory", response_model=InventoryItem)
+async def create_inventory_item(item: InventoryItemCreate):
+    item_dict = item.dict()
+    item_obj = InventoryItem(**item_dict)
+    item_data = prepare_for_mongo(item_obj.dict())
+    await db.inventory.insert_one(item_data)
+    return item_obj
+
+@api_router.get("/inventory", response_model=List[InventoryItem])
+async def get_inventory(
+    category: Optional[str] = None,
+    location: Optional[str] = None,
+    search: Optional[str] = None,
+    expiring_soon: Optional[bool] = None
+):
+    query = {}
+    
+    # Filter by category
+    if category:
+        query["category"] = category
+    
+    # Filter by location
+    if location:
+        query["location"] = location
+    
+    # Search filter
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"brand": {"$regex": search, "$options": "i"}},
+            {"notes": {"$regex": search, "$options": "i"}}
+        ]
+    
+    # Filter items expiring soon (within 7 days)
+    if expiring_soon:
+        from datetime import timedelta
+        week_from_now = (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()
+        query["expiration_date"] = {"$lte": week_from_now}
+    
+    items = await db.inventory.find(query).to_list(1000)
+    return [InventoryItem(**parse_from_mongo(item)) for item in items]
+
+@api_router.get("/inventory/{item_id}", response_model=InventoryItem)
+async def get_inventory_item(item_id: str):
+    item = await db.inventory.find_one({"id": item_id})
+    if not item:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    return InventoryItem(**parse_from_mongo(item))
+
+@api_router.put("/inventory/{item_id}", response_model=InventoryItem)
+async def update_inventory_item(item_id: str, item_update: InventoryItemUpdate):
+    update_data = {k: v for k, v in item_update.dict().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    update_data = prepare_for_mongo(update_data)
+    await db.inventory.update_one({"id": item_id}, {"$set": update_data})
+    
+    updated_item = await db.inventory.find_one({"id": item_id})
+    if not updated_item:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    return InventoryItem(**parse_from_mongo(updated_item))
+
+@api_router.delete("/inventory/{item_id}")
+async def delete_inventory_item(item_id: str):
+    result = await db.inventory.delete_one({"id": item_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    return {"message": "Inventory item deleted successfully"}
+
+@api_router.post("/inventory/barcode/{barcode}")
+async def lookup_barcode(barcode: str):
+    """
+    Lookup product information by barcode.
+    In a real implementation, this would integrate with APIs like:
+    - OpenFoodFacts API
+    - UPC Database API
+    - Edamam Food Database API
+    
+    For this MVP, we'll return mock data and let users manually enter details.
+    """
+    try:
+        # Check if we already have this barcode in our database
+        existing_item = await db.inventory.find_one({"barcode": barcode})
+        if existing_item:
+            return BarcodeProductInfo(
+                name=existing_item["name"],
+                brand=existing_item.get("brand"),
+                category=existing_item.get("category", "general"),
+                unit=existing_item.get("unit", "each")
+            )
+        
+        # Mock response for demonstration
+        # In production, integrate with food database APIs
+        mock_products = {
+            "012345678901": BarcodeProductInfo(
+                name="Organic Quinoa",
+                brand="Whole Foods",
+                category="pantry",
+                unit="lb"
+            ),
+            "123456789012": BarcodeProductInfo(
+                name="Atlantic Salmon Fillet",
+                brand="Fresh Market",
+                category="fish",
+                unit="lb"
+            ),
+            "234567890123": BarcodeProductInfo(
+                name="Organic Broccoli",
+                brand="Earthbound Farm",
+                category="produce",
+                unit="lb"
+            )
+        }
+        
+        if barcode in mock_products:
+            return mock_products[barcode]
+        else:
+            # Return generic response for unknown barcodes
+            return BarcodeProductInfo(
+                name=f"Unknown Product (Barcode: {barcode})",
+                brand="Unknown",
+                category="general",
+                unit="each"
+            )
+            
+    except Exception as e:
+        logging.error(f"Error looking up barcode {barcode}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to lookup barcode")
+
+@api_router.post("/inventory/check-availability")
+async def check_ingredient_availability(ingredient_names: List[str]):
+    """
+    Check which ingredients from a list are available in inventory
+    """
+    try:
+        available_items = {}
+        
+        for ingredient_name in ingredient_names:
+            # Search for similar items in inventory
+            items = await db.inventory.find({
+                "name": {"$regex": ingredient_name, "$options": "i"},
+                "quantity": {"$gt": 0}
+            }).to_list(100)
+            
+            if items:
+                total_quantity = sum(item.get("quantity", 0) for item in items)
+                available_items[ingredient_name] = {
+                    "available": True,
+                    "total_quantity": total_quantity,
+                    "items": [InventoryItem(**parse_from_mongo(item)) for item in items]
+                }
+            else:
+                available_items[ingredient_name] = {
+                    "available": False,
+                    "total_quantity": 0,
+                    "items": []
+                }
+        
+        return available_items
+        
+    except Exception as e:
+        logging.error(f"Error checking ingredient availability: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check ingredient availability")
+
 # Seed data endpoint for pre-populated recipes
 @api_router.post("/seed-recipes")
 async def seed_brain_balance_recipes():
