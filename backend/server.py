@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,10 +6,11 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime
-
+from datetime import datetime, timezone, date
+from enum import Enum
+from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -20,37 +21,545 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # Create the main app without a prefix
-app = FastAPI()
+app = FastAPI(title="Family Meal Prep Tool", version="1.0.0")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Enums for dietary restrictions
+class DietaryRestriction(str, Enum):
+    GLUTEN_FREE = "gluten_free"
+    DAIRY_FREE = "dairy_free"
+    NO_ADDED_SUGAR = "no_added_sugar"
+    PESCATARIAN = "pescatarian"
+    CARNIVORE = "carnivore"
+    VEGETARIAN = "vegetarian"
+    VEGAN = "vegan"
+    NUT_FREE = "nut_free"
+    SOY_FREE = "soy_free"
+    EGG_FREE = "egg_free"
 
-# Define Models
-class StatusCheck(BaseModel):
+class FilterMode(str, Enum):
+    STRICT = "strict"
+    FLEXIBLE = "flexible"
+
+class MealType(str, Enum):
+    BREAKFAST = "breakfast"
+    LUNCH = "lunch"
+    DINNER = "dinner"
+    SNACK = "snack"
+
+class DayOfWeek(str, Enum):
+    SUNDAY = "sunday"
+    MONDAY = "monday" 
+    TUESDAY = "tuesday"
+    WEDNESDAY = "wednesday"
+    THURSDAY = "thursday"
+    FRIDAY = "friday"
+    SATURDAY = "saturday"
+
+# Models
+class FamilyMember(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    name: str
+    dietary_restrictions: List[DietaryRestriction] = []
+    favorite_ingredients: List[str] = []
+    allergies: List[str] = []
+    dislikes: List[str] = []
+    notes: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+class FamilyMemberCreate(BaseModel):
+    name: str
+    dietary_restrictions: List[DietaryRestriction] = []
+    favorite_ingredients: List[str] = []
+    allergies: List[str] = []
+    dislikes: List[str] = []
+    notes: str = ""
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+class Ingredient(BaseModel):
+    name: str
+    quantity: str
+    unit: str
+    store_section: str = "general"
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.dict()
-    status_obj = StatusCheck(**status_dict)
-    _ = await db.status_checks.insert_one(status_obj.dict())
-    return status_obj
+class Recipe(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: str = ""
+    dietary_restrictions_compliant: List[DietaryRestriction] = []
+    ingredients: List[Ingredient] = []
+    instructions: List[str] = []
+    prep_time_minutes: int = 0
+    cook_time_minutes: int = 0
+    servings: int = 4
+    meal_types: List[MealType] = []
+    tags: List[str] = []
+    is_favorite: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+class RecipeCreate(BaseModel):
+    name: str
+    description: str = ""
+    dietary_restrictions_compliant: List[DietaryRestriction] = []
+    ingredients: List[Ingredient] = []
+    instructions: List[str] = []
+    prep_time_minutes: int = 0
+    cook_time_minutes: int = 0
+    servings: int = 4
+    meal_types: List[MealType] = []
+    tags: List[str] = []
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find().to_list(1000)
-    return [StatusCheck(**status_check) for status_check in status_checks]
+class MealPlan(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    week_start_date: date
+    family_member_id: str
+    day_of_week: DayOfWeek
+    meal_type: MealType
+    recipe_id: str
+    servings: int = 1
+    notes: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class MealPlanCreate(BaseModel):
+    week_start_date: date
+    family_member_id: str
+    day_of_week: DayOfWeek
+    meal_type: MealType
+    recipe_id: str
+    servings: int = 1
+    notes: str = ""
+
+class GroceryListItem(BaseModel):
+    ingredient_name: str
+    total_quantity: str
+    unit: str
+    store_section: str
+    from_recipes: List[str] = []
+
+class GroceryList(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    week_start_date: date
+    items: List[GroceryListItem] = []
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Helper functions
+def prepare_for_mongo(data: dict) -> dict:
+    """Convert Python objects to MongoDB-compatible format"""
+    if isinstance(data.get('created_at'), datetime):
+        data['created_at'] = data['created_at'].isoformat()
+    if isinstance(data.get('week_start_date'), date):
+        data['week_start_date'] = data['week_start_date'].isoformat()
+    return data
+
+def parse_from_mongo(item: dict) -> dict:
+    """Parse MongoDB data back to Python objects"""
+    if isinstance(item.get('created_at'), str):
+        item['created_at'] = datetime.fromisoformat(item['created_at'])
+    if isinstance(item.get('week_start_date'), str):
+        item['week_start_date'] = datetime.fromisoformat(item['week_start_date']).date()
+    return item
+
+# Initialize AI chat helper
+async def get_ai_recommendations(prompt: str) -> str:
+    """Get AI recommendations using emergent LLM"""
+    try:
+        chat = LlmChat(
+            api_key=os.environ.get('EMERGENT_LLM_KEY'),
+            session_id=f"meal-prep-{uuid.uuid4()}",
+            system_message="You are a helpful nutritionist and meal planning assistant specializing in dietary restrictions including Brain Balance diet, pescatarian, carnivore, and various food allergies. Provide practical, family-friendly meal suggestions and grocery optimization advice."
+        ).with_model("openai", "gpt-4o")
+        
+        user_message = UserMessage(text=prompt)
+        response = await chat.send_message(user_message)
+        return response
+    except Exception as e:
+        logging.error(f"AI recommendation error: {e}")
+        return "Unable to generate AI recommendations at this time."
+
+# Family Members endpoints
+@api_router.post("/family-members", response_model=FamilyMember)
+async def create_family_member(member: FamilyMemberCreate):
+    member_dict = member.dict()
+    member_obj = FamilyMember(**member_dict)
+    member_data = prepare_for_mongo(member_obj.dict())
+    await db.family_members.insert_one(member_data)
+    return member_obj
+
+@api_router.get("/family-members", response_model=List[FamilyMember])
+async def get_family_members():
+    members = await db.family_members.find().to_list(1000)
+    return [FamilyMember(**parse_from_mongo(member)) for member in members]
+
+@api_router.get("/family-members/{member_id}", response_model=FamilyMember)
+async def get_family_member(member_id: str):
+    member = await db.family_members.find_one({"id": member_id})
+    if not member:
+        raise HTTPException(status_code=404, detail="Family member not found")
+    return FamilyMember(**parse_from_mongo(member))
+
+@api_router.put("/family-members/{member_id}", response_model=FamilyMember)
+async def update_family_member(member_id: str, member_update: FamilyMemberCreate):
+    update_data = member_update.dict()
+    await db.family_members.update_one({"id": member_id}, {"$set": update_data})
+    updated_member = await db.family_members.find_one({"id": member_id})
+    if not updated_member:
+        raise HTTPException(status_code=404, detail="Family member not found")
+    return FamilyMember(**parse_from_mongo(updated_member))
+
+@api_router.delete("/family-members/{member_id}")
+async def delete_family_member(member_id: str):
+    result = await db.family_members.delete_one({"id": member_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Family member not found")
+    return {"message": "Family member deleted successfully"}
+
+# Recipe endpoints
+@api_router.post("/recipes", response_model=Recipe)
+async def create_recipe(recipe: RecipeCreate):
+    recipe_dict = recipe.dict()
+    recipe_obj = Recipe(**recipe_dict)
+    recipe_data = prepare_for_mongo(recipe_obj.dict())
+    await db.recipes.insert_one(recipe_data)
+    return recipe_obj
+
+@api_router.get("/recipes", response_model=List[Recipe])
+async def get_recipes(
+    dietary_restrictions: Optional[List[DietaryRestriction]] = None,
+    filter_mode: FilterMode = FilterMode.FLEXIBLE,
+    meal_type: Optional[MealType] = None,
+    search: Optional[str] = None
+):
+    query = {}
+    
+    # Apply dietary restriction filters
+    if dietary_restrictions:
+        if filter_mode == FilterMode.STRICT:
+            # Recipe must comply with ALL dietary restrictions
+            query["dietary_restrictions_compliant"] = {"$all": dietary_restrictions}
+        else:
+            # Recipe must comply with AT LEAST ONE dietary restriction
+            query["dietary_restrictions_compliant"] = {"$in": dietary_restrictions}
+    
+    # Apply meal type filter
+    if meal_type:
+        query["meal_types"] = meal_type
+    
+    # Apply search filter
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"description": {"$regex": search, "$options": "i"}},
+            {"tags": {"$regex": search, "$options": "i"}}
+        ]
+    
+    recipes = await db.recipes.find(query).to_list(1000)
+    return [Recipe(**parse_from_mongo(recipe)) for recipe in recipes]
+
+@api_router.get("/recipes/{recipe_id}", response_model=Recipe)
+async def get_recipe(recipe_id: str):
+    recipe = await db.recipes.find_one({"id": recipe_id})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return Recipe(**parse_from_mongo(recipe))
+
+@api_router.put("/recipes/{recipe_id}", response_model=Recipe)
+async def update_recipe(recipe_id: str, recipe_update: RecipeCreate):
+    update_data = recipe_update.dict()
+    await db.recipes.update_one({"id": recipe_id}, {"$set": update_data})
+    updated_recipe = await db.recipes.find_one({"id": recipe_id})
+    if not updated_recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return Recipe(**parse_from_mongo(updated_recipe))
+
+@api_router.delete("/recipes/{recipe_id}")
+async def delete_recipe(recipe_id: str):
+    result = await db.recipes.delete_one({"id": recipe_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return {"message": "Recipe deleted successfully"}
+
+# Meal Plan endpoints
+@api_router.post("/meal-plans", response_model=MealPlan)
+async def create_meal_plan(meal_plan: MealPlanCreate):
+    meal_plan_dict = meal_plan.dict()
+    meal_plan_obj = MealPlan(**meal_plan_dict)
+    meal_plan_data = prepare_for_mongo(meal_plan_obj.dict())
+    await db.meal_plans.insert_one(meal_plan_data)
+    return meal_plan_obj
+
+@api_router.get("/meal-plans", response_model=List[MealPlan])
+async def get_meal_plans(
+    week_start_date: Optional[str] = None,
+    family_member_id: Optional[str] = None
+):
+    query = {}
+    if week_start_date:
+        query["week_start_date"] = week_start_date
+    if family_member_id:
+        query["family_member_id"] = family_member_id
+    
+    meal_plans = await db.meal_plans.find(query).to_list(1000)
+    return [MealPlan(**parse_from_mongo(plan)) for plan in meal_plans]
+
+@api_router.delete("/meal-plans/{meal_plan_id}")
+async def delete_meal_plan(meal_plan_id: str):
+    result = await db.meal_plans.delete_one({"id": meal_plan_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Meal plan not found")
+    return {"message": "Meal plan deleted successfully"}
+
+# Grocery List endpoints
+@api_router.post("/grocery-list/{week_start_date}")
+async def generate_grocery_list(week_start_date: str):
+    """Generate grocery list from meal plans for a specific week"""
+    try:
+        # Get all meal plans for the week
+        meal_plans = await db.meal_plans.find({"week_start_date": week_start_date}).to_list(1000)
+        
+        if not meal_plans:
+            return GroceryList(week_start_date=datetime.fromisoformat(week_start_date).date())
+        
+        # Collect all recipe IDs
+        recipe_ids = [plan["recipe_id"] for plan in meal_plans]
+        
+        # Get all recipes
+        recipes = await db.recipes.find({"id": {"$in": recipe_ids}}).to_list(1000)
+        
+        # Aggregate ingredients
+        ingredient_totals = {}
+        
+        for plan in meal_plans:
+            recipe = next((r for r in recipes if r["id"] == plan["recipe_id"]), None)
+            if recipe:
+                servings_multiplier = plan.get("servings", 1) / recipe.get("servings", 4)
+                
+                for ingredient in recipe.get("ingredients", []):
+                    key = f"{ingredient['name']}_{ingredient['unit']}"
+                    
+                    if key not in ingredient_totals:
+                        ingredient_totals[key] = {
+                            "ingredient_name": ingredient["name"],
+                            "total_quantity": 0,
+                            "unit": ingredient["unit"],
+                            "store_section": ingredient.get("store_section", "general"),
+                            "from_recipes": []
+                        }
+                    
+                    try:
+                        quantity = float(ingredient["quantity"]) * servings_multiplier
+                        ingredient_totals[key]["total_quantity"] += quantity
+                    except ValueError:
+                        # Handle non-numeric quantities like "1 cup"
+                        ingredient_totals[key]["total_quantity"] = f"See recipes: {', '.join(ingredient_totals[key]['from_recipes'])}"
+                    
+                    if recipe["name"] not in ingredient_totals[key]["from_recipes"]:
+                        ingredient_totals[key]["from_recipes"].append(recipe["name"])
+        
+        # Convert to grocery list items
+        grocery_items = []
+        for item in ingredient_totals.values():
+            grocery_items.append(GroceryListItem(
+                ingredient_name=item["ingredient_name"],
+                total_quantity=str(item["total_quantity"]),
+                unit=item["unit"],
+                store_section=item["store_section"],
+                from_recipes=item["from_recipes"]
+            ))
+        
+        # Sort by store section
+        grocery_items.sort(key=lambda x: x.store_section)
+        
+        grocery_list = GroceryList(
+            week_start_date=datetime.fromisoformat(week_start_date).date(),
+            items=grocery_items
+        )
+        
+        # Save grocery list
+        grocery_data = prepare_for_mongo(grocery_list.dict())
+        await db.grocery_lists.insert_one(grocery_data)
+        
+        return grocery_list
+        
+    except Exception as e:
+        logging.error(f"Error generating grocery list: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate grocery list")
+
+@api_router.get("/grocery-lists/{week_start_date}", response_model=GroceryList)
+async def get_grocery_list(week_start_date: str):
+    grocery_list = await db.grocery_lists.find_one({"week_start_date": week_start_date})
+    if not grocery_list:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
+    return GroceryList(**parse_from_mongo(grocery_list))
+
+# AI Recommendations endpoints
+@api_router.post("/ai/recipe-recommendations")
+async def get_recipe_recommendations(
+    family_member_ids: List[str],
+    meal_type: MealType,
+    filter_mode: FilterMode = FilterMode.FLEXIBLE
+):
+    """Get AI-powered recipe recommendations for family members"""
+    try:
+        # Get family members
+        members = await db.family_members.find({"id": {"$in": family_member_ids}}).to_list(1000)
+        
+        # Build prompt
+        member_info = []
+        for member in members:
+            restrictions = ", ".join(member.get("dietary_restrictions", []))
+            allergies = ", ".join(member.get("allergies", []))
+            favorites = ", ".join(member.get("favorite_ingredients", []))
+            member_info.append(f"- {member['name']}: Dietary restrictions: {restrictions}, Allergies: {allergies}, Favorites: {favorites}")
+        
+        prompt = f"""
+        Please recommend {meal_type} recipes for a family with these members:
+        {chr(10).join(member_info)}
+        
+        Filter mode: {filter_mode}
+        
+        Please provide 3-5 specific recipe suggestions that work for this family, considering their dietary restrictions and preferences. Include recipe names, brief descriptions, and why they work for this family.
+        """
+        
+        recommendations = await get_ai_recommendations(prompt)
+        return {"recommendations": recommendations}
+        
+    except Exception as e:
+        logging.error(f"Error getting recipe recommendations: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get recipe recommendations")
+
+@api_router.post("/ai/grocery-optimization")
+async def optimize_grocery_list(week_start_date: str):
+    """Get AI suggestions for grocery list optimization"""
+    try:
+        # Get grocery list
+        grocery_list = await db.grocery_lists.find_one({"week_start_date": week_start_date})
+        
+        if not grocery_list:
+            raise HTTPException(status_code=404, detail="Grocery list not found for this week")
+        
+        # Build prompt
+        items_text = []
+        for item in grocery_list.get("items", []):
+            items_text.append(f"- {item['ingredient_name']}: {item['total_quantity']} {item['unit']} (from: {', '.join(item['from_recipes'])})")
+        
+        prompt = f"""
+        Here's a grocery list for the week:
+        {chr(10).join(items_text)}
+        
+        Please provide optimization suggestions including:
+        1. Ingredient substitutions to save money or improve nutrition
+        2. Bulk buying recommendations
+        3. Seasonal alternatives
+        4. Store organization tips
+        5. Items that could be prepared at home instead of bought pre-made
+        
+        Keep suggestions practical for a busy family.
+        """
+        
+        optimization = await get_ai_recommendations(prompt)
+        return {"optimization_suggestions": optimization}
+        
+    except Exception as e:
+        logging.error(f"Error optimizing grocery list: {e}")
+        raise HTTPException(status_code=500, detail="Failed to optimize grocery list")
+
+# Seed data endpoint for pre-populated recipes
+@api_router.post("/seed-recipes")
+async def seed_brain_balance_recipes():
+    """Seed the database with brain balance and family-friendly recipes"""
+    
+    sample_recipes = [
+        {
+            "name": "Grilled Salmon with Roasted Vegetables",
+            "description": "Brain Balance compliant pescatarian dish with omega-3 rich salmon and colorful vegetables",
+            "dietary_restrictions_compliant": [DietaryRestriction.GLUTEN_FREE, DietaryRestriction.DAIRY_FREE, DietaryRestriction.NO_ADDED_SUGAR, DietaryRestriction.PESCATARIAN],
+            "ingredients": [
+                {"name": "Salmon fillet", "quantity": "4", "unit": "pieces", "store_section": "fish"},
+                {"name": "Broccoli", "quantity": "2", "unit": "cups", "store_section": "produce"},
+                {"name": "Bell peppers", "quantity": "2", "unit": "pieces", "store_section": "produce"},
+                {"name": "Sweet potato", "quantity": "2", "unit": "medium", "store_section": "produce"},
+                {"name": "Olive oil", "quantity": "3", "unit": "tbsp", "store_section": "pantry"},
+                {"name": "Lemon", "quantity": "1", "unit": "piece", "store_section": "produce"},
+                {"name": "Garlic", "quantity": "3", "unit": "cloves", "store_section": "produce"}
+            ],
+            "instructions": [
+                "Preheat oven to 425°F",
+                "Cut vegetables into chunks and toss with olive oil, salt, and pepper", 
+                "Roast vegetables for 20 minutes",
+                "Season salmon with lemon, garlic, salt, and pepper",
+                "Grill salmon for 4-6 minutes per side",
+                "Serve salmon over roasted vegetables"
+            ],
+            "prep_time_minutes": 15,
+            "cook_time_minutes": 25,
+            "servings": 4,
+            "meal_types": [MealType.DINNER],
+            "tags": ["brain-balance", "omega-3", "anti-inflammatory"]
+        },
+        {
+            "name": "Grass-Fed Beef Stir Fry",
+            "description": "Carnivore-friendly stir fry with grass-fed beef and minimal vegetables",
+            "dietary_restrictions_compliant": [DietaryRestriction.GLUTEN_FREE, DietaryRestriction.DAIRY_FREE, DietaryRestriction.NO_ADDED_SUGAR],
+            "ingredients": [
+                {"name": "Grass-fed beef strips", "quantity": "1", "unit": "lb", "store_section": "meat"},
+                {"name": "Zucchini", "quantity": "2", "unit": "medium", "store_section": "produce"},
+                {"name": "Bell pepper", "quantity": "1", "unit": "piece", "store_section": "produce"},
+                {"name": "Coconut oil", "quantity": "2", "unit": "tbsp", "store_section": "pantry"},
+                {"name": "Coconut aminos", "quantity": "3", "unit": "tbsp", "store_section": "pantry"},
+                {"name": "Ginger", "quantity": "1", "unit": "tbsp", "store_section": "produce"},
+                {"name": "Garlic", "quantity": "2", "unit": "cloves", "store_section": "produce"}
+            ],
+            "instructions": [
+                "Heat coconut oil in large pan over high heat",
+                "Add beef strips and cook until browned",
+                "Add vegetables and stir fry for 3-4 minutes", 
+                "Add garlic, ginger, and coconut aminos",
+                "Cook for another 2 minutes until vegetables are tender-crisp",
+                "Serve immediately"
+            ],
+            "prep_time_minutes": 10,
+            "cook_time_minutes": 15,
+            "servings": 4,
+            "meal_types": [MealType.DINNER],
+            "tags": ["carnivore-friendly", "quick", "high-protein"]
+        },
+        {
+            "name": "Brain Balance Smoothie Bowl",
+            "description": "Nutritious breakfast bowl compliant with Brain Balance diet",
+            "dietary_restrictions_compliant": [DietaryRestriction.GLUTEN_FREE, DietaryRestriction.DAIRY_FREE, DietaryRestriction.NO_ADDED_SUGAR],
+            "ingredients": [
+                {"name": "Frozen berries", "quantity": "1", "unit": "cup", "store_section": "frozen"},
+                {"name": "Banana", "quantity": "1", "unit": "piece", "store_section": "produce"},
+                {"name": "Coconut milk", "quantity": "0.5", "unit": "cup", "store_section": "pantry"},
+                {"name": "Chia seeds", "quantity": "2", "unit": "tbsp", "store_section": "pantry"},
+                {"name": "Unsweetened coconut flakes", "quantity": "2", "unit": "tbsp", "store_section": "pantry"},
+                {"name": "Pumpkin seeds", "quantity": "1", "unit": "tbsp", "store_section": "pantry"}
+            ],
+            "instructions": [
+                "Blend frozen berries, half the banana, and coconut milk until smooth",
+                "Pour into bowl",
+                "Slice remaining banana and arrange on top",
+                "Sprinkle with chia seeds, coconut flakes, and pumpkin seeds",
+                "Serve immediately"
+            ],
+            "prep_time_minutes": 5,
+            "cook_time_minutes": 0,
+            "servings": 1,
+            "meal_types": [MealType.BREAKFAST],
+            "tags": ["brain-balance", "antioxidants", "quick"]
+        }
+    ]
+    
+    # Clear existing recipes and add new ones
+    await db.recipes.delete_many({})
+    
+    for recipe_data in sample_recipes:
+        recipe_obj = Recipe(**recipe_data)
+        recipe_dict = prepare_for_mongo(recipe_obj.dict())
+        await db.recipes.insert_one(recipe_dict)
+    
+    return {"message": f"Seeded {len(sample_recipes)} brain balance recipes successfully"}
 
 # Include the router in the main app
 app.include_router(api_router)
