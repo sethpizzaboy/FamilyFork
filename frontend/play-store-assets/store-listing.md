@@ -98,3 +98,4 @@ Website: https://github.com/sethpizzaboy/FamilyFork
 - Showcases key app features
 - Should be visually appealing and informative
 
+

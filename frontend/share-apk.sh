@@ -40,3 +40,4 @@ echo "6. Tap Install"
 echo "7. Open Family Fork from app drawer!"
 echo
 
+

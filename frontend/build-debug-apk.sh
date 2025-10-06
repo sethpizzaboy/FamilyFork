@@ -53,3 +53,4 @@ echo
 echo "Or copy the APK to the phone and install manually!"
 echo
 
+

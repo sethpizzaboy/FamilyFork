@@ -22,3 +22,4 @@ const Badge = ({ className, variant = 'default', ...props }) => {
 };
 
 export { Badge };
+

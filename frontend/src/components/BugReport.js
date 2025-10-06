@@ -378,3 +378,4 @@ const BugReport = () => {
 
 export default BugReport;
 
+
