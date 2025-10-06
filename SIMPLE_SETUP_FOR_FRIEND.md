@@ -16,8 +16,10 @@ cd FamilyFork
 ```
 
 ### Step 3: Start the App (2 minutes)
-**Windows:** Double-click `INSTALL.bat`  
-**Mac/Linux:** Run `./INSTALL.sh`
+**Windows:** Double-click `SETUP.bat`  
+**Mac/Linux:** Run `./SETUP.sh`
+
+Choose option 1 for web app, option 2 for mobile APK, or option 3 for both!
 
 ### Step 4: Use the App (30 seconds)
 1. Open browser to: http://localhost:3000
