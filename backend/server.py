@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,6 +10,11 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, date
 from enum import Enum
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import hashlib
+import secrets
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -18,6 +23,66 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Email configuration
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USERNAME = "lightspeedup.smtp@gmail.com"
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')  # Set this in environment variables
+ADMIN_EMAIL = "sethpizzaboy@gmail.com"
+FRIEND_EMAIL = "ddeturk@gmail.com"
+
+# Admin authentication
+ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')  # Set this in environment variables
+if not ADMIN_TOKEN:
+    ADMIN_TOKEN = secrets.token_urlsafe(32)
+    logging.warning(f"ADMIN_TOKEN not set, generated: {ADMIN_TOKEN}")
+
+# Email service
+async def send_email(to_email: str, subject: str, body: str, is_html: bool = False):
+    """Send email notification"""
+    try:
+        if not SMTP_PASSWORD:
+            logging.warning("SMTP_PASSWORD not set, skipping email")
+            return False
+        
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USERNAME
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        
+        if is_html:
+            msg.attach(MIMEText(body, 'html'))
+        else:
+            msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        
+        logging.info(f"Email sent to {to_email}: {subject}")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to send email to {to_email}: {str(e)}")
+        return False
+
+# Admin authentication
+def verify_admin_token(token: str) -> bool:
+    """Verify admin token"""
+    return token == ADMIN_TOKEN
+
+def get_admin_auth():
+    """Dependency for admin authentication"""
+    def admin_auth(token: str = Depends(lambda: None)):
+        if not token or not verify_admin_token(token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid admin token"
+            )
+        return True
+    return admin_auth
 
 # Create the main app without a prefix
 app = FastAPI(title="Family Meal Prep Tool", version="1.0.0")
@@ -56,6 +121,26 @@ class DayOfWeek(str, Enum):
     THURSDAY = "thursday"
     FRIDAY = "friday"
     SATURDAY = "saturday"
+
+# Bug Tracking Enums
+class BugStatus(str, Enum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+    REOPENED = "reopened"
+
+class BugPriority(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+class BugType(str, Enum):
+    BUG = "bug"
+    FEATURE_REQUEST = "feature_request"
+    IMPROVEMENT = "improvement"
+    QUESTION = "question"
 
 # Models
 class FamilyMember(BaseModel):
@@ -180,6 +265,68 @@ class InventoryItemUpdate(BaseModel):
     purchase_date: Optional[date] = None
     location: Optional[str] = None
     notes: Optional[str] = None
+
+# Bug Tracking Models
+class BugReport(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    description: str
+    bug_type: BugType
+    priority: BugPriority = BugPriority.MEDIUM
+    status: BugStatus = BugStatus.OPEN
+    reporter_email: str
+    reporter_name: str = ""
+    assigned_to: Optional[str] = None
+    tags: List[str] = []
+    attachments: List[str] = []
+    steps_to_reproduce: Optional[str] = None
+    expected_behavior: Optional[str] = None
+    actual_behavior: Optional[str] = None
+    environment: Optional[str] = None
+    browser_info: Optional[str] = None
+    device_info: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resolved_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+
+class BugComment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    bug_id: str
+    author_email: str
+    author_name: str = ""
+    comment: str
+    is_internal: bool = False  # Internal comments only visible to admin
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class BugReportCreate(BaseModel):
+    title: str
+    description: str
+    bug_type: BugType
+    priority: BugPriority = BugPriority.MEDIUM
+    reporter_email: str
+    reporter_name: str = ""
+    tags: List[str] = []
+    steps_to_reproduce: Optional[str] = None
+    expected_behavior: Optional[str] = None
+    actual_behavior: Optional[str] = None
+    environment: Optional[str] = None
+    browser_info: Optional[str] = None
+    device_info: Optional[str] = None
+
+class BugCommentCreate(BaseModel):
+    bug_id: str
+    author_email: str
+    author_name: str = ""
+    comment: str
+    is_internal: bool = False
+
+class BugUpdate(BaseModel):
+    status: Optional[BugStatus] = None
+    priority: Optional[BugPriority] = None
+    assigned_to: Optional[str] = None
+    tags: Optional[List[str]] = None
+    internal_notes: Optional[str] = None
 
 class BarcodeProductInfo(BaseModel):
     name: str
@@ -1284,6 +1431,331 @@ async def get_shopping_list_for_recipe(recipe_id: str):
         
     except Exception as e:
         logging.error(f"Error generating shopping list: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === BUG TRACKING ENDPOINTS ===
+@api_router.post("/bugs")
+async def create_bug_report(bug_report: BugReportCreate):
+    """Create a new bug report or feature request"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Create bug report
+        bug_dict = {
+            "id": str(uuid.uuid4()),
+            "title": bug_report.title,
+            "description": bug_report.description,
+            "bug_type": bug_report.bug_type,
+            "priority": bug_report.priority,
+            "status": BugStatus.OPEN,
+            "reporter_email": bug_report.reporter_email,
+            "reporter_name": bug_report.reporter_name,
+            "tags": bug_report.tags,
+            "steps_to_reproduce": bug_report.steps_to_reproduce,
+            "expected_behavior": bug_report.expected_behavior,
+            "actual_behavior": bug_report.actual_behavior,
+            "environment": bug_report.environment,
+            "browser_info": bug_report.browser_info,
+            "device_info": bug_report.device_info,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        result = await db.bug_reports.insert_one(bug_dict)
+        bug_dict["_id"] = str(result.inserted_id)
+        
+        # Send email notifications
+        subject = f"New {bug_report.bug_type.value.title()} Report: {bug_report.title}"
+        
+        # Email to admin (you)
+        admin_body = f"""
+New {bug_report.bug_type.value.title()} Report
+
+Title: {bug_report.title}
+Description: {bug_report.description}
+Priority: {bug_report.priority.value.title()}
+Reporter: {bug_report.reporter_name} ({bug_report.reporter_email})
+Type: {bug_report.bug_type.value.title()}
+
+Steps to Reproduce:
+{bug_report.steps_to_reproduce or 'Not provided'}
+
+Expected Behavior:
+{bug_report.expected_behavior or 'Not provided'}
+
+Actual Behavior:
+{bug_report.actual_behavior or 'Not provided'}
+
+Environment: {bug_report.environment or 'Not provided'}
+Browser: {bug_report.browser_info or 'Not provided'}
+Device: {bug_report.device_info or 'Not provided'}
+
+Report ID: {bug_dict['id']}
+Created: {bug_dict['created_at'].strftime('%Y-%m-%d %H:%M:%S UTC')}
+
+Please log in to the admin panel to manage this report.
+        """
+        
+        # Email to friend
+        friend_body = f"""
+Thank you for reporting this {bug_report.bug_type.value}!
+
+Your report has been received and assigned ID: {bug_dict['id']}
+
+Title: {bug_report.title}
+Priority: {bug_report.priority.value.title()}
+Status: Open
+
+We'll review your report and get back to you soon. You'll receive email updates when the status changes.
+
+Thank you for helping improve Family Fork!
+        """
+        
+        # Send emails
+        await send_email(ADMIN_EMAIL, subject, admin_body)
+        await send_email(bug_report.reporter_email, f"Report Received: {bug_report.title}", friend_body)
+        
+        return bug_dict
+        
+    except Exception as e:
+        logging.error(f"Error creating bug report: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/bugs")
+async def get_bug_reports(status_filter: Optional[str] = None, limit: int = 50):
+    """Get bug reports (public endpoint for friend to view their reports)"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        query = {}
+        if status_filter:
+            query["status"] = status_filter
+        
+        reports = await db.bug_reports.find(query).sort("created_at", -1).limit(limit).to_list(limit)
+        
+        # Convert ObjectId to string
+        for report in reports:
+            report["_id"] = str(report["_id"])
+        
+        return reports
+        
+    except Exception as e:
+        logging.error(f"Error getting bug reports: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/bugs/{bug_id}")
+async def get_bug_report(bug_id: str):
+    """Get a specific bug report"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        report = await db.bug_reports.find_one({"id": bug_id})
+        if not report:
+            raise HTTPException(status_code=404, detail="Bug report not found")
+        
+        report["_id"] = str(report["_id"])
+        
+        # Get comments
+        comments = await db.bug_comments.find({"bug_id": bug_id}).sort("created_at", 1).to_list(100)
+        for comment in comments:
+            comment["_id"] = str(comment["_id"])
+        
+        report["comments"] = comments
+        return report
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting bug report: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/bugs/{bug_id}/comments")
+async def add_bug_comment(bug_id: str, comment: BugCommentCreate):
+    """Add a comment to a bug report"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Verify bug exists
+        bug = await db.bug_reports.find_one({"id": bug_id})
+        if not bug:
+            raise HTTPException(status_code=404, detail="Bug report not found")
+        
+        # Create comment
+        comment_dict = {
+            "id": str(uuid.uuid4()),
+            "bug_id": bug_id,
+            "author_email": comment.author_email,
+            "author_name": comment.author_name,
+            "comment": comment.comment,
+            "is_internal": comment.is_internal,
+            "created_at": datetime.now(timezone.utc)
+        }
+        
+        result = await db.bug_comments.insert_one(comment_dict)
+        comment_dict["_id"] = str(result.inserted_id)
+        
+        # Send email notification to admin if not internal
+        if not comment.is_internal:
+            subject = f"New Comment on Bug Report: {bug['title']}"
+            body = f"""
+New comment added to bug report: {bug['title']}
+
+Comment by: {comment.author_name} ({comment.author_email})
+Comment: {comment.comment}
+
+Bug Report ID: {bug_id}
+Status: {bug['status'].value.title()}
+Priority: {bug['priority'].value.title()}
+
+Please log in to the admin panel to respond.
+            """
+            await send_email(ADMIN_EMAIL, subject, body)
+        
+        return comment_dict
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error adding bug comment: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === ADMIN BUG TRACKING ENDPOINTS ===
+@api_router.get("/admin/bugs", dependencies=[Depends(get_admin_auth())])
+async def get_all_bug_reports_admin():
+    """Get all bug reports for admin (with internal comments)"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        reports = await db.bug_reports.find().sort("created_at", -1).to_list(1000)
+        
+        # Get comments for each report
+        for report in reports:
+            report["_id"] = str(report["_id"])
+            comments = await db.bug_comments.find({"bug_id": report["id"]}).sort("created_at", 1).to_list(100)
+            for comment in comments:
+                comment["_id"] = str(comment["_id"])
+            report["comments"] = comments
+        
+        return reports
+        
+    except Exception as e:
+        logging.error(f"Error getting admin bug reports: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.put("/admin/bugs/{bug_id}", dependencies=[Depends(get_admin_auth())])
+async def update_bug_report_admin(bug_id: str, update: BugUpdate):
+    """Update bug report (admin only)"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get current bug report
+        bug = await db.bug_reports.find_one({"id": bug_id})
+        if not bug:
+            raise HTTPException(status_code=404, detail="Bug report not found")
+        
+        # Prepare update data
+        update_data = {"updated_at": datetime.now(timezone.utc)}
+        
+        if update.status:
+            update_data["status"] = update.status
+            if update.status == BugStatus.RESOLVED:
+                update_data["resolved_at"] = datetime.now(timezone.utc)
+            elif update.status == BugStatus.CLOSED:
+                update_data["closed_at"] = datetime.now(timezone.utc)
+        
+        if update.priority:
+            update_data["priority"] = update.priority
+        
+        if update.assigned_to:
+            update_data["assigned_to"] = update.assigned_to
+        
+        if update.tags:
+            update_data["tags"] = update.tags
+        
+        # Update bug report
+        result = await db.bug_reports.update_one(
+            {"id": bug_id},
+            {"$set": update_data}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Bug report not found")
+        
+        # Add internal comment if provided
+        if update.internal_notes:
+            comment_dict = {
+                "id": str(uuid.uuid4()),
+                "bug_id": bug_id,
+                "author_email": ADMIN_EMAIL,
+                "author_name": "Admin",
+                "comment": update.internal_notes,
+                "is_internal": True,
+                "created_at": datetime.now(timezone.utc)
+            }
+            await db.bug_comments.insert_one(comment_dict)
+        
+        # Send status update email to reporter
+        if update.status and update.status != bug["status"]:
+            subject = f"Bug Report Update: {bug['title']}"
+            body = f"""
+Your bug report has been updated:
+
+Title: {bug['title']}
+New Status: {update.status.value.title()}
+Priority: {update.priority.value.title() if update.priority else bug['priority'].value.title()}
+
+{update.internal_notes or 'No additional notes provided.'}
+
+Report ID: {bug_id}
+Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
+
+Thank you for your feedback!
+            """
+            await send_email(bug["reporter_email"], subject, body)
+        
+        return {"message": "Bug report updated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating bug report: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/admin/stats", dependencies=[Depends(get_admin_auth())])
+async def get_bug_stats_admin():
+    """Get bug tracking statistics for admin"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        total_bugs = await db.bug_reports.count_documents({})
+        open_bugs = await db.bug_reports.count_documents({"status": BugStatus.OPEN})
+        in_progress_bugs = await db.bug_reports.count_documents({"status": BugStatus.IN_PROGRESS})
+        resolved_bugs = await db.bug_reports.count_documents({"status": BugStatus.RESOLVED})
+        closed_bugs = await db.bug_reports.count_documents({"status": BugStatus.CLOSED})
+        
+        # Get recent bugs
+        recent_bugs = await db.bug_reports.find().sort("created_at", -1).limit(10).to_list(10)
+        for bug in recent_bugs:
+            bug["_id"] = str(bug["_id"])
+        
+        return {
+            "total_bugs": total_bugs,
+            "open_bugs": open_bugs,
+            "in_progress_bugs": in_progress_bugs,
+            "resolved_bugs": resolved_bugs,
+            "closed_bugs": closed_bugs,
+            "recent_bugs": recent_bugs
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting bug stats: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # === QUICK RECIPE ENDPOINTS ===
