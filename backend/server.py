@@ -770,6 +770,211 @@ async def seed_brain_balance_recipes():
     
     return {"message": f"Seeded {len(sample_recipes)} brain balance recipes successfully"}
 
+# === RECIPE DATABASE INITIALIZATION ===
+async def initialize_recipe_database():
+    """Initialize the database with pre-built recipes for quick, healthy meals"""
+    try:
+        if db is None:
+            return
+
+        # Check if recipes already exist
+        existing_recipes = await db.recipes.count_documents({})
+        if existing_recipes > 0:
+            return  # Recipes already initialized
+
+        # Quick, healthy recipes for specific dietary needs
+        recipes = [
+            # PESCATARIAN + NO SUGAR + NO DAIRY + NO GLUTEN (20 minutes)
+            {
+                "name": "Lemon Herb Salmon with Roasted Vegetables",
+                "description": "Quick, healthy salmon with seasonal vegetables - perfect for pescatarian diet",
+                "dietary_restrictions_compliant": ["pescatarian", "dairy_free", "no_added_sugar", "gluten_free"],
+                "ingredients": [
+                    {"name": "Salmon fillets", "quantity": "4", "unit": "pieces", "store_section": "meat"},
+                    {"name": "Zucchini", "quantity": "2", "unit": "medium", "store_section": "produce"},
+                    {"name": "Bell peppers", "quantity": "2", "unit": "pieces", "store_section": "produce"},
+                    {"name": "Olive oil", "quantity": "3", "unit": "tbsp", "store_section": "pantry"},
+                    {"name": "Lemon", "quantity": "1", "unit": "piece", "store_section": "produce"},
+                    {"name": "Fresh herbs", "quantity": "2", "unit": "tbsp", "store_section": "produce"},
+                    {"name": "Salt", "quantity": "1", "unit": "tsp", "store_section": "pantry"},
+                    {"name": "Black pepper", "quantity": "1", "unit": "tsp", "store_section": "pantry"}
+                ],
+                "instructions": [
+                    "Preheat oven to 425°F (220°C)",
+                    "Cut vegetables into 1-inch pieces",
+                    "Toss vegetables with 2 tbsp olive oil, salt, and pepper",
+                    "Place vegetables on baking sheet, roast for 15 minutes",
+                    "Season salmon with salt, pepper, and herbs",
+                    "Add salmon to baking sheet, roast for 8-10 minutes",
+                    "Serve with lemon wedges"
+                ],
+                "prep_time_minutes": 10,
+                "cook_time_minutes": 15,
+                "servings": 4,
+                "meal_types": ["dinner"],
+                "tags": ["quick", "healthy", "pescatarian", "one-pan"]
+            },
+            
+            # CARNIVORE (20 minutes)
+            {
+                "name": "Beef Stir-Fry with Vegetables",
+                "description": "Quick beef stir-fry - perfect for carnivore diet",
+                "dietary_restrictions_compliant": ["carnivore"],
+                "ingredients": [
+                    {"name": "Beef strips", "quantity": "1", "unit": "lb", "store_section": "meat"},
+                    {"name": "Broccoli", "quantity": "1", "unit": "head", "store_section": "produce"},
+                    {"name": "Carrots", "quantity": "2", "unit": "medium", "store_section": "produce"},
+                    {"name": "Coconut oil", "quantity": "2", "unit": "tbsp", "store_section": "pantry"},
+                    {"name": "Garlic", "quantity": "3", "unit": "cloves", "store_section": "produce"},
+                    {"name": "Ginger", "quantity": "1", "unit": "tbsp", "store_section": "produce"},
+                    {"name": "Salt", "quantity": "1", "unit": "tsp", "store_section": "pantry"}
+                ],
+                "instructions": [
+                    "Cut beef into thin strips",
+                    "Cut vegetables into bite-sized pieces",
+                    "Heat oil in large pan over high heat",
+                    "Add beef, cook for 3-4 minutes until browned",
+                    "Add vegetables, cook for 5-6 minutes",
+                    "Add garlic and ginger, cook for 1 minute",
+                    "Season with salt, serve immediately"
+                ],
+                "prep_time_minutes": 10,
+                "cook_time_minutes": 10,
+                "servings": 4,
+                "meal_types": ["dinner"],
+                "tags": ["quick", "carnivore", "one-pan"]
+            },
+            
+            # BRAIN BALANCE (NO DAIRY + NO SUGAR + NO GLUTEN) (20 minutes)
+            {
+                "name": "Turkey and Vegetable Skillet",
+                "description": "Quick, brain-healthy meal with turkey and vegetables",
+                "dietary_restrictions_compliant": ["dairy_free", "no_added_sugar", "gluten_free"],
+                "ingredients": [
+                    {"name": "Ground turkey", "quantity": "1", "unit": "lb", "store_section": "meat"},
+                    {"name": "Sweet potatoes", "quantity": "2", "unit": "medium", "store_section": "produce"},
+                    {"name": "Spinach", "quantity": "2", "unit": "cups", "store_section": "produce"},
+                    {"name": "Avocado", "quantity": "1", "unit": "piece", "store_section": "produce"},
+                    {"name": "Coconut oil", "quantity": "2", "unit": "tbsp", "store_section": "pantry"},
+                    {"name": "Turmeric", "quantity": "1", "unit": "tsp", "store_section": "pantry"},
+                    {"name": "Salt", "quantity": "1", "unit": "tsp", "store_section": "pantry"}
+                ],
+                "instructions": [
+                    "Dice sweet potatoes into small cubes",
+                    "Heat oil in large skillet",
+                    "Add sweet potatoes, cook for 8 minutes",
+                    "Add ground turkey, cook for 5 minutes",
+                    "Add spinach, cook for 2 minutes",
+                    "Season with turmeric and salt",
+                    "Top with sliced avocado"
+                ],
+                "prep_time_minutes": 10,
+                "cook_time_minutes": 15,
+                "servings": 4,
+                "meal_types": ["dinner"],
+                "tags": ["quick", "brain-healthy", "one-pan"]
+            },
+            
+            # MEAL PREP RECIPES (1 hour for multiple meals)
+            {
+                "name": "Sunday Meal Prep - Protein Bowls",
+                "description": "Batch cook proteins and vegetables for the week",
+                "dietary_restrictions_compliant": ["pescatarian", "carnivore", "dairy_free", "no_added_sugar", "gluten_free"],
+                "ingredients": [
+                    {"name": "Chicken breast", "quantity": "2", "unit": "lbs", "store_section": "meat"},
+                    {"name": "Salmon fillets", "quantity": "1", "unit": "lb", "store_section": "meat"},
+                    {"name": "Ground turkey", "quantity": "1", "unit": "lb", "store_section": "meat"},
+                    {"name": "Broccoli", "quantity": "2", "unit": "heads", "store_section": "produce"},
+                    {"name": "Sweet potatoes", "quantity": "4", "unit": "large", "store_section": "produce"},
+                    {"name": "Cauliflower", "quantity": "1", "unit": "head", "store_section": "produce"},
+                    {"name": "Olive oil", "quantity": "1/4", "unit": "cup", "store_section": "pantry"},
+                    {"name": "Salt", "quantity": "2", "unit": "tsp", "store_section": "pantry"},
+                    {"name": "Black pepper", "quantity": "1", "unit": "tsp", "store_section": "pantry"}
+                ],
+                "instructions": [
+                    "Preheat oven to 400°F (200°C)",
+                    "Cut all vegetables into bite-sized pieces",
+                    "Season proteins with salt and pepper",
+                    "Roast vegetables for 25-30 minutes",
+                    "Cook proteins separately (bake, grill, or pan-fry)",
+                    "Let cool, portion into containers",
+                    "Store in refrigerator for up to 5 days"
+                ],
+                "prep_time_minutes": 30,
+                "cook_time_minutes": 30,
+                "servings": 12,
+                "meal_types": ["lunch", "dinner"],
+                "tags": ["meal-prep", "batch-cooking", "weekly-prep"]
+            },
+            
+            # QUICK BREAKFAST (10 minutes)
+            {
+                "name": "Protein Smoothie Bowl",
+                "description": "Quick, nutritious breakfast for all diets",
+                "dietary_restrictions_compliant": ["pescatarian", "dairy_free", "no_added_sugar", "gluten_free"],
+                "ingredients": [
+                    {"name": "Frozen berries", "quantity": "1", "unit": "cup", "store_section": "frozen"},
+                    {"name": "Banana", "quantity": "1", "unit": "medium", "store_section": "produce"},
+                    {"name": "Coconut milk", "quantity": "1", "unit": "cup", "store_section": "pantry"},
+                    {"name": "Protein powder", "quantity": "1", "unit": "scoop", "store_section": "pantry"},
+                    {"name": "Chia seeds", "quantity": "1", "unit": "tbsp", "store_section": "pantry"},
+                    {"name": "Almond butter", "quantity": "1", "unit": "tbsp", "store_section": "pantry"}
+                ],
+                "instructions": [
+                    "Blend frozen berries, banana, and coconut milk",
+                    "Add protein powder, blend until smooth",
+                    "Pour into bowl",
+                    "Top with chia seeds and almond butter",
+                    "Serve immediately"
+                ],
+                "prep_time_minutes": 5,
+                "cook_time_minutes": 0,
+                "servings": 1,
+                "meal_types": ["breakfast"],
+                "tags": ["quick", "healthy", "smoothie"]
+            },
+            
+            # QUICK LUNCH (15 minutes)
+            {
+                "name": "Mediterranean Salad Bowl",
+                "description": "Quick, healthy lunch with Mediterranean flavors",
+                "dietary_restrictions_compliant": ["pescatarian", "dairy_free", "no_added_sugar", "gluten_free"],
+                "ingredients": [
+                    {"name": "Mixed greens", "quantity": "4", "unit": "cups", "store_section": "produce"},
+                    {"name": "Canned tuna", "quantity": "2", "unit": "cans", "store_section": "pantry"},
+                    {"name": "Cucumber", "quantity": "1", "unit": "medium", "store_section": "produce"},
+                    {"name": "Tomatoes", "quantity": "2", "unit": "medium", "store_section": "produce"},
+                    {"name": "Olives", "quantity": "1/2", "unit": "cup", "store_section": "pantry"},
+                    {"name": "Olive oil", "quantity": "3", "unit": "tbsp", "store_section": "pantry"},
+                    {"name": "Lemon", "quantity": "1", "unit": "piece", "store_section": "produce"},
+                    {"name": "Salt", "quantity": "1", "unit": "tsp", "store_section": "pantry"}
+                ],
+                "instructions": [
+                    "Wash and chop all vegetables",
+                    "Drain and flake tuna",
+                    "Combine all ingredients in large bowl",
+                    "Drizzle with olive oil and lemon juice",
+                    "Season with salt, toss gently",
+                    "Serve immediately"
+                ],
+                "prep_time_minutes": 10,
+                "cook_time_minutes": 0,
+                "servings": 4,
+                "meal_types": ["lunch"],
+                "tags": ["quick", "healthy", "no-cook"]
+            }
+        ]
+
+        # Insert all recipes
+        for recipe in recipes:
+            recipe["created_at"] = datetime.now(timezone.utc)
+            await db.recipes.insert_one(recipe)
+
+        logging.info(f"Initialized {len(recipes)} recipes in database")
+
+    except Exception as e:
+        logging.error(f"Error initializing recipe database: {str(e)}")
+
 # === INVENTORY MANAGEMENT ENDPOINTS ===
 @api_router.get("/inventory")
 async def get_inventory():
@@ -849,6 +1054,71 @@ async def delete_inventory_item(item_id: str):
         raise
     except Exception as e:
         logging.error(f"Error deleting inventory item: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === RECIPE DATABASE INITIALIZATION ENDPOINT ===
+@api_router.post("/recipes/initialize")
+async def initialize_recipes():
+    """Initialize the database with pre-built recipes for quick, healthy meals"""
+    try:
+        await initialize_recipe_database()
+        return {"message": "Recipe database initialized successfully with quick, healthy meals"}
+    except Exception as e:
+        logging.error(f"Error initializing recipes: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize recipes: {str(e)}")
+
+# === QUICK RECIPE ENDPOINTS ===
+@api_router.get("/recipes/quick")
+async def get_quick_recipes(max_time_minutes: int = 30):
+    """Get recipes that can be made in 30 minutes or less"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        recipes = await db.recipes.find({
+            "$expr": {
+                "$lte": [
+                    {"$add": ["$prep_time_minutes", "$cook_time_minutes"]},
+                    max_time_minutes
+                ]
+            }
+        }).to_list(100)
+        
+        return recipes
+    except Exception as e:
+        logging.error(f"Error getting quick recipes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/recipes/meal-prep")
+async def get_meal_prep_recipes():
+    """Get recipes designed for meal prep and batch cooking"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        recipes = await db.recipes.find({
+            "tags": {"$in": ["meal-prep", "batch-cooking", "weekly-prep"]}
+        }).to_list(100)
+        
+        return recipes
+    except Exception as e:
+        logging.error(f"Error getting meal prep recipes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/recipes/diet/{diet_type}")
+async def get_recipes_by_diet(diet_type: str):
+    """Get recipes filtered by specific dietary restrictions"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        recipes = await db.recipes.find({
+            "dietary_restrictions_compliant": diet_type
+        }).to_list(100)
+        
+        return recipes
+    except Exception as e:
+        logging.error(f"Error getting recipes by diet: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # === BARCODE LOOKUP ENDPOINT ===
@@ -959,6 +1229,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the recipe database with quick, healthy meals on startup"""
+    try:
+        await initialize_recipe_database()
+        logging.info("Recipe database initialization completed")
+    except Exception as e:
+        logging.error(f"Error during startup: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
