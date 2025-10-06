@@ -770,6 +770,178 @@ async def seed_brain_balance_recipes():
     
     return {"message": f"Seeded {len(sample_recipes)} brain balance recipes successfully"}
 
+# === INVENTORY MANAGEMENT ENDPOINTS ===
+@api_router.get("/inventory")
+async def get_inventory():
+    """Get all inventory items"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        items = await db.inventory.find().to_list(1000)
+        return items
+        
+    except Exception as e:
+        logging.error(f"Error getting inventory: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/inventory")
+async def create_inventory_item(item: dict):
+    """Create a new inventory item"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Add timestamp
+        item['created_at'] = datetime.now(timezone.utc)
+        item['updated_at'] = datetime.now(timezone.utc)
+        
+        result = await db.inventory.insert_one(item)
+        item['_id'] = str(result.inserted_id)
+        
+        return item
+        
+    except Exception as e:
+        logging.error(f"Error creating inventory item: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.put("/inventory/{item_id}")
+async def update_inventory_item(item_id: str, item: dict):
+    """Update an inventory item"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Add update timestamp
+        item['updated_at'] = datetime.now(timezone.utc)
+        
+        result = await db.inventory.update_one(
+            {"_id": item_id},
+            {"$set": item}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        
+        return {"message": "Inventory item updated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating inventory item: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.delete("/inventory/{item_id}")
+async def delete_inventory_item(item_id: str):
+    """Delete an inventory item"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        result = await db.inventory.delete_one({"_id": item_id})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        
+        return {"message": "Inventory item deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting inventory item: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === BARCODE LOOKUP ENDPOINT ===
+@api_router.post("/inventory/barcode/{barcode}")
+async def lookup_barcode(barcode: str):
+    """Look up product information by barcode using Open Food Facts API"""
+    try:
+        import requests
+        
+        # Validate barcode format (should be numeric, 8-14 digits)
+        if not barcode.isdigit() or len(barcode) < 8 or len(barcode) > 14:
+            raise HTTPException(status_code=400, detail="Invalid barcode format")
+        
+        # Try Open Food Facts API first (free, comprehensive food database)
+        try:
+            response = requests.get(f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get('status') == 1 and data.get('product'):
+                    product = data['product']
+                    
+                    # Extract product information
+                    name = product.get('product_name', 'Unknown Product')
+                    brand = product.get('brands', '')
+                    category = product.get('categories_tags', ['general'])
+                    
+                    # Map Open Food Facts categories to our categories
+                    category_mapping = {
+                        'en:dairy': 'dairy',
+                        'en:meat': 'meat',
+                        'en:fish': 'fish',
+                        'en:fruits': 'produce',
+                        'en:vegetables': 'produce',
+                        'en:cereals': 'pantry',
+                        'en:beverages': 'general',
+                        'en:snacks': 'general',
+                        'en:frozen': 'frozen'
+                    }
+                    
+                    mapped_category = 'general'
+                    for cat in category:
+                        for key, value in category_mapping.items():
+                            if key in cat.lower():
+                                mapped_category = value
+                                break
+                        if mapped_category != 'general':
+                            break
+                    
+                    # Determine unit based on product type
+                    unit = 'each'
+                    if 'liquid' in product.get('text', '').lower() or 'beverage' in product.get('categories_tags', []):
+                        unit = 'bottle'
+                    elif 'frozen' in product.get('categories_tags', []):
+                        unit = 'package'
+                    
+                    return {
+                        "name": name,
+                        "brand": brand,
+                        "category": mapped_category,
+                        "unit": unit,
+                        "barcode": barcode,
+                        "source": "Open Food Facts",
+                        "nutrition_info": {
+                            "calories": product.get('nutriments', {}).get('energy-kcal_100g'),
+                            "protein": product.get('nutriments', {}).get('proteins_100g'),
+                            "carbs": product.get('nutriments', {}).get('carbohydrates_100g'),
+                            "fat": product.get('nutriments', {}).get('fat_100g')
+                        }
+                    }
+        except Exception as e:
+            logging.warning(f"Open Food Facts API failed: {e}")
+        
+        # Fallback: Try UPC Database API (if you have an API key)
+        # You can add other barcode databases here as fallbacks
+        
+        # If no database found the product, return basic info
+        return {
+            "name": f"Product {barcode}",
+            "brand": "",
+            "category": "general",
+            "unit": "each",
+            "barcode": barcode,
+            "source": "Manual Entry",
+            "nutrition_info": {}
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error looking up barcode {barcode}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to lookup barcode: {str(e)}")
+
 # Include the router in the main app
 app.include_router(api_router)
 

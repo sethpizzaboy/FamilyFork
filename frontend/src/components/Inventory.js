@@ -220,28 +220,86 @@ const Inventory = () => {
 
   const startCamera = async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
+      // Import QuaggaJS dynamically
+      const Quagga = await import('quagga');
+      
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: videoRef.current,
+          constraints: {
+            width: 640,
+            height: 480,
+            facingMode: "environment"
+          }
+        },
+        decoder: {
+          readers: [
+            "code_128_reader",
+            "ean_reader",
+            "ean_8_reader",
+            "code_39_reader",
+            "code_39_vin_reader",
+            "codabar_reader",
+            "upc_reader",
+            "upc_e_reader",
+            "i2of5_reader"
+          ]
+        },
+        locate: true,
+        locator: {
+          patchSize: "medium",
+          halfSample: true
+        }
+      }, (err) => {
+        if (err) {
+          console.error('QuaggaJS initialization error:', err);
+          toast.error('Unable to initialize barcode scanner. Please enter barcode manually.');
+          return;
+        }
+        
+        Quagga.start();
+        setScanningBarcode(true);
+        
+        // Listen for barcode detection
+        Quagga.onDetected((data) => {
+          const barcode = data.codeResult.code;
+          console.log('Barcode detected:', barcode);
+          Quagga.stop();
+          setScanningBarcode(false);
+          setShowScanner(false);
+          lookupBarcode(barcode);
+        });
       });
       
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        setStream(mediaStream);
-      }
-      setScanningBarcode(true);
     } catch (error) {
       console.error('Error accessing camera:', error);
       toast.error('Unable to access camera. Please enter barcode manually.');
     }
   };
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
+  const stopCamera = async () => {
+    try {
+      // Stop QuaggaJS if it's running
+      if (scanningBarcode) {
+        const Quagga = await import('quagga');
+        Quagga.stop();
+      }
+      
+      // Stop any media stream
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        setStream(null);
+      }
+      
+      setScanningBarcode(false);
+      setShowScanner(false);
+    } catch (error) {
+      console.error('Error stopping camera:', error);
+      setScanningBarcode(false);
+      setShowScanner(false);
     }
-    setScanningBarcode(false);
-    setShowScanner(false);
   };
 
   const lookupBarcode = async (barcode) => {
