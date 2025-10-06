@@ -97,3 +97,4 @@ Website: https://github.com/sethpizzaboy/FamilyFork
 - 1024x500 pixels
 - Showcases key app features
 - Should be visually appealing and informative
+

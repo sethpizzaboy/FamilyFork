@@ -237,3 +237,4 @@ npx cap open android
 **Ready to publish Family Fork on the Google Play Store!** 🚀
 
 The app is now configured as a native Android app with all the necessary files and structure. Follow this guide to complete the publishing process and get your app live on the Play Store.
+

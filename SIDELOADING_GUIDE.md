@@ -225,3 +225,4 @@ Your Family Fork app is ready for sideloading! This method is:
 - ✅ **Works on any Android device**
 
 **Build the APK and install it on your friend's Pixel phone today!** 📱✨
+

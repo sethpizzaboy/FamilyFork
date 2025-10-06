@@ -49,3 +49,4 @@ echo 4. Build the release version
 echo 5. Upload to Google Play Console
 echo.
 pause
+

@@ -179,3 +179,4 @@ When upgrading between major versions:
 **Current Version**: v0.1.0  
 **Next Release**: v0.1.1 (Bug fixes and improvements)  
 **Last Updated**: October 2025
+

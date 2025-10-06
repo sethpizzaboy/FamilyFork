@@ -52,3 +52,4 @@ echo "4. Run: adb install app-debug.apk"
 echo
 echo "Or copy the APK to the phone and install manually!"
 echo
+

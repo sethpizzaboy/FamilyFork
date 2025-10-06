@@ -39,3 +39,4 @@ echo "5. Allow installation from unknown sources if prompted"
 echo "6. Tap Install"
 echo "7. Open Family Fork from app drawer!"
 echo
+

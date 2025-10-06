@@ -45,3 +45,4 @@ echo "3. Create or use existing keystore for signing"
 echo "4. Build the release version"
 echo "5. Upload to Google Play Console"
 echo
+

@@ -293,3 +293,4 @@ const AIRecipeSuggestions = () => {
 };
 
 export default AIRecipeSuggestions;
+

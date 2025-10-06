@@ -26,3 +26,4 @@ db.inventory.createIndex({ "family_id": 1 });
 db.inventory.createIndex({ "expiration_date": 1 });
 
 print('Family Fork database initialized successfully!');
+

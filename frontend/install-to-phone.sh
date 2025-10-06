@@ -56,3 +56,4 @@ echo "- Family member management"
 echo "- Recipe search and management"
 echo "- Grocery list generation"
 echo
+

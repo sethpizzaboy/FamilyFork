@@ -136,3 +136,4 @@ Your friend can be using Family Fork in under 5 minutes, saving hours every week
 - **Quick Help:** Text you for immediate assistance
 
 **Family Fork - Making meal planning simple when time is precious.** 🍽️❤️
+
