@@ -1067,6 +1067,225 @@ async def initialize_recipes():
         logging.error(f"Error initializing recipes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to initialize recipes: {str(e)}")
 
+# === AI-POWERED RECIPE SUGGESTIONS ===
+@api_router.get("/recipes/suggestions/inventory")
+async def get_recipe_suggestions_from_inventory():
+    """Get recipe suggestions based on available inventory items"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get all inventory items
+        inventory_items = await db.inventory.find().to_list(1000)
+        
+        if not inventory_items:
+            return {"message": "No inventory items found. Add some items to get recipe suggestions!"}
+        
+        # Extract ingredient names from inventory
+        available_ingredients = [item.get('name', '').lower() for item in inventory_items if item.get('name')]
+        
+        # Find recipes that can be made with available ingredients
+        suggested_recipes = []
+        
+        # Get all recipes
+        all_recipes = await db.recipes.find().to_list(100)
+        
+        for recipe in all_recipes:
+            recipe_ingredients = [ing.get('name', '').lower() for ing in recipe.get('ingredients', [])]
+            
+            # Calculate match percentage
+            matches = 0
+            total_ingredients = len(recipe_ingredients)
+            
+            for recipe_ingredient in recipe_ingredients:
+                # Check for exact matches or partial matches
+                for available_ingredient in available_ingredients:
+                    if (recipe_ingredient in available_ingredient or 
+                        available_ingredient in recipe_ingredient or
+                        any(word in available_ingredient for word in recipe_ingredient.split())):
+                        matches += 1
+                        break
+            
+            if matches > 0:
+                match_percentage = (matches / total_ingredients) * 100
+                recipe['match_percentage'] = match_percentage
+                recipe['available_ingredients'] = matches
+                recipe['total_ingredients'] = total_ingredients
+                suggested_recipes.append(recipe)
+        
+        # Sort by match percentage (highest first)
+        suggested_recipes.sort(key=lambda x: x['match_percentage'], reverse=True)
+        
+        return {
+            "suggested_recipes": suggested_recipes[:10],  # Top 10 suggestions
+            "inventory_summary": {
+                "total_items": len(inventory_items),
+                "available_ingredients": available_ingredients[:10]  # Show first 10
+            }
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting recipe suggestions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/recipes/suggestions/ai")
+async def get_ai_meal_suggestions(request: dict):
+    """Get AI-powered meal suggestions based on inventory and dietary restrictions"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get inventory items
+        inventory_items = await db.inventory.find().to_list(1000)
+        available_ingredients = [item.get('name', '') for item in inventory_items if item.get('name')]
+        
+        # Get dietary restrictions from request
+        dietary_restrictions = request.get('dietary_restrictions', [])
+        max_time_minutes = request.get('max_time_minutes', 30)
+        meal_type = request.get('meal_type', 'dinner')
+        
+        # AI-powered recipe suggestions based on available ingredients
+        ai_suggestions = []
+        
+        # Get all recipes
+        all_recipes = await db.recipes.find().to_list(100)
+        
+        for recipe in all_recipes:
+            # Check dietary restrictions
+            recipe_dietary = recipe.get('dietary_restrictions_compliant', [])
+            if dietary_restrictions and not any(diet in recipe_dietary for diet in dietary_restrictions):
+                continue
+            
+            # Check cooking time
+            total_time = recipe.get('prep_time_minutes', 0) + recipe.get('cook_time_minutes', 0)
+            if total_time > max_time_minutes:
+                continue
+            
+            # Check meal type
+            recipe_meal_types = recipe.get('meal_types', [])
+            if meal_type and meal_type not in recipe_meal_types:
+                continue
+            
+            # Calculate ingredient availability
+            recipe_ingredients = [ing.get('name', '') for ing in recipe.get('ingredients', [])]
+            available_count = 0
+            
+            for recipe_ingredient in recipe_ingredients:
+                for available_ingredient in available_ingredients:
+                    if (recipe_ingredient.lower() in available_ingredient.lower() or 
+                        available_ingredient.lower() in recipe_ingredient.lower()):
+                        available_count += 1
+                        break
+            
+            if available_count > 0:
+                availability_percentage = (available_count / len(recipe_ingredients)) * 100
+                recipe['availability_percentage'] = availability_percentage
+                recipe['available_ingredients_count'] = available_count
+                recipe['total_ingredients_count'] = len(recipe_ingredients)
+                ai_suggestions.append(recipe)
+        
+        # Sort by availability percentage
+        ai_suggestions.sort(key=lambda x: x['availability_percentage'], reverse=True)
+        
+        return {
+            "ai_suggestions": ai_suggestions[:5],  # Top 5 AI suggestions
+            "inventory_analysis": {
+                "total_items": len(inventory_items),
+                "available_ingredients": available_ingredients[:10],
+                "dietary_restrictions": dietary_restrictions,
+                "max_time_minutes": max_time_minutes,
+                "meal_type": meal_type
+            }
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting AI meal suggestions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/recipes/suggestions/missing-ingredients/{recipe_id}")
+async def get_missing_ingredients_for_recipe(recipe_id: str):
+    """Get missing ingredients for a specific recipe based on inventory"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get the recipe
+        recipe = await db.recipes.find_one({"_id": recipe_id})
+        if not recipe:
+            raise HTTPException(status_code=404, detail="Recipe not found")
+        
+        # Get inventory items
+        inventory_items = await db.inventory.find().to_list(1000)
+        available_ingredients = [item.get('name', '').lower() for item in inventory_items if item.get('name')]
+        
+        # Check which ingredients are missing
+        missing_ingredients = []
+        available_ingredients_for_recipe = []
+        
+        for ingredient in recipe.get('ingredients', []):
+            ingredient_name = ingredient.get('name', '').lower()
+            found = False
+            
+            for available_ingredient in available_ingredients:
+                if (ingredient_name in available_ingredient or 
+                    available_ingredient in ingredient_name or
+                    any(word in available_ingredient for word in ingredient_name.split())):
+                    available_ingredients_for_recipe.append(ingredient)
+                    found = True
+                    break
+            
+            if not found:
+                missing_ingredients.append(ingredient)
+        
+        return {
+            "recipe_name": recipe.get('name', ''),
+            "missing_ingredients": missing_ingredients,
+            "available_ingredients": available_ingredients_for_recipe,
+            "completion_percentage": (len(available_ingredients_for_recipe) / len(recipe.get('ingredients', []))) * 100
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting missing ingredients: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/recipes/suggestions/shopping-list/{recipe_id}")
+async def get_shopping_list_for_recipe(recipe_id: str):
+    """Generate shopping list for a specific recipe based on missing ingredients"""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get missing ingredients
+        missing_data = await get_missing_ingredients_for_recipe(recipe_id)
+        
+        if isinstance(missing_data, dict) and 'missing_ingredients' in missing_data:
+            missing_ingredients = missing_data['missing_ingredients']
+        else:
+            missing_ingredients = []
+        
+        # Organize by store section
+        shopping_list = {}
+        for ingredient in missing_ingredients:
+            store_section = ingredient.get('store_section', 'general')
+            if store_section not in shopping_list:
+                shopping_list[store_section] = []
+            shopping_list[store_section].append({
+                'name': ingredient.get('name', ''),
+                'quantity': ingredient.get('quantity', ''),
+                'unit': ingredient.get('unit', '')
+            })
+        
+        return {
+            "recipe_name": missing_data.get('recipe_name', ''),
+            "shopping_list": shopping_list,
+            "total_items_needed": len(missing_ingredients),
+            "completion_percentage": missing_data.get('completion_percentage', 0)
+        }
+        
+    except Exception as e:
+        logging.error(f"Error generating shopping list: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # === QUICK RECIPE ENDPOINTS ===
 @api_router.get("/recipes/quick")
 async def get_quick_recipes(max_time_minutes: int = 30):
