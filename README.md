@@ -731,6 +731,37 @@ For support and questions:
 - [ ] Family calendar integration
 - [ ] Advanced dietary restriction management
 
+## 💝 Donations
+
+If you find FamilyFork useful and would like to support its development, donations are greatly appreciated! Your support helps maintain and improve this family meal planning application.
+
+### Solana (Preferred)
+**Address:** `EhaMxyPNkkMRTugajdzcQ17M2XqCe16GH5UmX7JkmnEu`  
+**Network:** Solana  
+**Wallet:** Phantom (@Norelec)
+
+```
+EhaMxyPNkkMRTugajdzcQ17M2XqCe16GH5UmX7JkmnEu
+```
+
+### How to Donate
+
+1. **Open your Phantom wallet**
+2. **Copy the Solana address above**
+3. **Send SOL to the address**
+4. **Any amount is appreciated!**
+
+### Thank You! 🙏
+
+Your donations help support:
+- ✅ **Development time** for new meal planning features
+- ✅ **Recipe database** expansion and AI improvements
+- ✅ **Mobile app** development for iOS and Android
+- ✅ **API improvements** and performance optimizations
+- ✅ **Documentation** and user guides
+
+Every donation, no matter the size, makes a difference and is deeply appreciated!
+
 ---
 
 **Author:** Norelec  
